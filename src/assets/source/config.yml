@@ -29,6 +29,7 @@ jx3: # 剑网3 相关配置
         calculator_url: "" # 计算器 URL 不带斜杠
         bla_url: "" # 警长 API 不带斜杠
         cqc_url: "" # 池清川分析器 API 不带斜杠
+        attribute_url: "" # 世界频道装备 API（单行 URL，与 attribute.txt 二选一）
         # 注意！轮询微博使用浏览器模拟请求，占用可能会很高，请谨慎开启！
     ws:
         url: "" # JX3API WebSocket 地址

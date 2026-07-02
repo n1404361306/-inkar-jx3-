@@ -31,6 +31,7 @@ class Jx3API(BaseModel):
     calculator_url: str = ""
     bla_url: str = ""
     cqc_url: str = ""
+    attribute_url: str = ""
 
 
 class Jx3WS(BaseModel):

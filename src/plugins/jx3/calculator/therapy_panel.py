@@ -1,4 +1,4 @@
-﻿from typing import Any
+from typing import Any
 import html
 
 from jinja2 import Template

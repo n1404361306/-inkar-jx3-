@@ -120,7 +120,12 @@ async def get_attr_v4(server: str, name: str, conditions: str = ""):
     if not role_info.roleId:
         return PROMPT.EquipNotFound
     # await JX3PlayerAttribute.from_tuilan(role_info.roleId, role_info.serverName, role_info.globalRoleId)
-    await JX3PlayerAttribute.from_jx3api(role_info.serverName, role_info.roleName, True)
+    await JX3PlayerAttribute.fetch_auto(
+        role_info.roleId,
+        role_info.serverName,
+        role_info.roleName,
+        role_info.globalRoleId,
+    )
     instance = await JX3PlayerAttribute.from_database(int(role_info.globalRoleId), conditions, True)
     if instance is None:
         return PROMPT.EquipNotFound

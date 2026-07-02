@@ -6,7 +6,7 @@ from src.config import Config
 from src.const.jx3.dungeon import Dungeon
 from src.const.prompts import PROMPT
 from src.const.jx3.server import Server
-from src.utils.permission import check_group_permission, check_permission
+from src.utils.permission import check_group_permission, check_permission, denied
 from src.utils.database.operation import get_group_settings
 
 from .zone_drop import get_drop_list_image
@@ -87,8 +87,10 @@ role_monsters_matcher = on_command("jx3_role_monster", aliases={"精耐"}, force
 
 @role_monsters_matcher.handle()
 async def _(event: GroupMessageEvent, args: Message = CommandArg()):
-    if not Config.jx3.api.enable or not check_group_permission(event.group_id, "group.application.role_monster"):
+    if not Config.jx3.api.enable:
         return
+    if not check_group_permission(event.group_id, "group.application.role_monster"):
+        await role_monsters_matcher.finish(denied("group.application.role_monster"))
     if args.extract_plain_text() == "":
         return
     arg = args.extract_plain_text().strip().split(" ")

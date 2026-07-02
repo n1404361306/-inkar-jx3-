@@ -68,11 +68,19 @@ class ScreenshotGenerator:
     _browser: Browser | Any = None
     _context: BrowserContext | Any = None
     _playwright: Any | None = None
+    _launch_lock: asyncio.Lock | None = None
 
+    @classmethod
+    def _lock(cls) -> asyncio.Lock:
+        if cls._launch_lock is None:
+            cls._launch_lock = asyncio.Lock()
+        return cls._launch_lock
 
     @classmethod
     async def launch(cls):
-        if cls._browser is None:
+        async with cls._lock():
+            if cls._browser is not None and cls._context is not None:
+                return
             cls._playwright = await async_playwright().start()
             cls._browser = await cls._playwright.chromium.launch(headless=True)
             cls._context = await cls._browser.new_context()
@@ -93,11 +101,9 @@ class ScreenshotGenerator:
         """
         根据配置生成截图。
         """
-        if self._browser is None or self._context is None:
-            asyncio.create_task(ScreenshotGenerator.launch())
-            # raise ValueError("Browser has not been initialized!")
+        await ScreenshotGenerator.launch()
 
-        page = await self._browser.new_page(viewport=config.viewport) # type: ignore
+        page = await self._browser.new_page(viewport=config.viewport)  # type: ignore
         if config.wait_for_network:
             await page.goto(page_source, wait_until="networkidle")
         else:

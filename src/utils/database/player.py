@@ -75,10 +75,27 @@ async def get_uid_data(global_role_id: str = "", role_id: str = "", server: str 
         "zone": Server(server).zone,
         "server": server
     }
-    data = (await Request("https://m.pvp.xoyo.com/role/indicator", params=params).post(tuilan=True)).json()
-    data: dict[str, Any] = data["data"]["role_info"]
-    if data is None:
+    response = (await Request("https://m.pvp.xoyo.com/role/indicator", params=params).post(tuilan=True)).json()
+    payload = response.get("data") if isinstance(response, dict) else None
+    role_info = payload.get("role_info") if isinstance(payload, dict) else None
+    if role_info is None:
+        if not msg and Config.jx3.api.enable and server and (role_name or role_id):
+            detail = await get_role_id(role_name, server)
+            if detail is not None:
+                updated_data = RoleData(
+                    bodyName=detail["bodyName"],
+                    campName=detail["campName"],
+                    forceName=detail["forceName"],
+                    globalRoleId=str(global_role_id or detail["globalId"]),
+                    roleName=detail.get("roleName", role_name),
+                    roleId=detail.get("roleId", role_id),
+                    serverName=detail.get("serverName", server),
+                )
+                db.delete(RoleData(), "roleName = ? AND serverName = ?", updated_data.roleName, updated_data.serverName)
+                db.save(updated_data)
+                return updated_data
         return PROMPT.UIDInvalid if msg else RoleData()
+    data: dict[str, Any] = role_info
     bodyName = data.pop("body_type")
     campName = data.pop("camp")
     forceName = data.pop("force")

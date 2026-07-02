@@ -1157,143 +1157,158 @@ async def LNXAnalyze(file_name: str, url: str, anonymous: bool = False, user_id:
 
 # A Shi Na (Cheng Qing)
 async def ASNAnalyze(file_name: str, url: str, anonymous: bool = False, user_id: int = 0):
-    async with AsyncClient(verify=False) as client:
-        resp = await client.post(f"{Config.jx3.api.cqc_url}/asn_analyze", json={"jcl_url": url, "jcl_name": file_name}, timeout=600)
-        data = resp.json()
-    tables = []
-    final_tables = []
-    for each_record in data["data"]["hps"]:
-        if each_record == {}:
-            final_tables.append(
-                Template(yxc_table).render(
-                    tables = "\n".join(tables)
-                )
-            )
-            tables = []
-            continue
-        player_name = each_record["name"]
-        if anonymous:
-            player_name = "匿名玩家"
-        tables.append(
-            Template(hps_detail_template_body_main).render(
-                icon=Kungfu.with_internel_id(int(each_record["kungfu_id"]), True).icon,
-                name=player_name,
-                value=each_record["value"]
-            )
-        )
-        skills = dict(sorted(each_record["skills"].items(), key=lambda item: sum(item[1]), reverse=True))
-        for skill_name, skill_values in skills.items():
-            tables.append(
-                Template(hps_detail_template_body_sub).render(
-                    name = skill_name,
-                    count = len(skill_values),
-                    value = sum(skill_values),
-                    percent = str(round(sum(skill_values) / each_record["value"] * 100, 2)) + "%"
-                )
-            )
-    html = Template(
-        read(TEMPLATES + "/jx3/health_detail.html")
-    ).render(
-        font = ASSETS + "/font/PingFangSC-Semibold.otf",
-        tables = "\n".join(final_tables),
-        saohua = get_saohua(),
-        function_name = "阿史那承庆 · 死侍期间治疗吸收盾 HPS 统计"
-    )
-    hps_image = await generate(html, ".container", segment=True)
-    round_tables = []
-    for each_record in data["data"]["hit"]:
-        round_rows = []
-        for player_name, values in dict(sorted(each_record.items(), key=lambda item: sum(item[1].values()), reverse=True)).items():
-            if anonymous:
-                player_name = "匿名玩家"
-            round_rows.append(
-                Template(asn_qte_template_body_main).render(
-                    name=player_name,
-                    good=values["good"],
-                    bad=values["bad"]
-                )
-            )
-        round_table = Template(asn_qte_table).render(
-            tables="\n".join(round_rows)
-        )
-        round_tables.append(round_table)
-    html = Template(
-        read(TEMPLATES + "/jx3/health_detail.html")
-    ).render(
-        font=ASSETS + "/font/PingFangSC-Semibold.otf",
-        tables="\n".join(round_tables),
-        saohua=get_saohua(),
-        function_name="阿史那承庆 · QTE 统计"
-    )
+    import gc
+    import os
+    import tempfile
 
-    qte_image = await generate(html, ".container", segment=True)
-    return hps_image + qte_image
+    from src.plugins.jx3.calculator.asn.compute import compute_asn
+    from src.plugins.jx3.calculator.asn.parser import MAX_ASN_JCL_BYTES
+    from src.plugins.jx3.calculator.asn.render import render_asn_images
+    from src.plugins.jx3.calculator.lgz.parser import check_memory_available
+
+    check_memory_available()
+    tmp_path: str | None = None
+    try:
+        async with AsyncClient(verify=False, timeout=600) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                clen = int(resp.headers.get("content-length") or 0)
+                if clen > MAX_ASN_JCL_BYTES:
+                    return f"JCL 文件过大（{clen // 1024 // 1024}MB），无法分析"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jcl") as tmp:
+                    tmp_path = tmp.name
+                    total = 0
+                    async for chunk in resp.aiter_bytes(65536):
+                        total += len(chunk)
+                        if total > MAX_ASN_JCL_BYTES:
+                            return f"JCL 文件过大（>{MAX_ASN_JCL_BYTES // 1024 // 1024}MB），无法分析"
+                        tmp.write(chunk)
+
+        try:
+            data = compute_asn(tmp_path)
+        except ValueError as e:
+            return str(e)
+        except MemoryError as e:
+            return str(e)
+        finally:
+            gc.collect()
+
+        if not data.jiqu_waves and not data.dead_rounds:
+            return "未识别到阿史那承庆汲取或死侍数据，请更换 JCL！"
+
+        images = await render_asn_images(data, anonymous=anonymous)
+        del data
+        gc.collect()
+        return images[1] + images[0]
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+# Generic Boss DPS/HPS
+async def BOSSAnalyze(file_name: str, url: str, anonymous: bool = False, user_id: int = 0):
+    import gc
+    import os
+    import tempfile
+
+    from src.plugins.jx3.calculator.boss.compute import compute_boss_fight
+    from src.plugins.jx3.calculator.boss.parser import MAX_BOSS_JCL_BYTES
+    from src.plugins.jx3.calculator.boss.render import render_boss_image
+    from src.plugins.jx3.calculator.lgz.parser import check_memory_available
+
+    check_memory_available()
+    tmp_path: str | None = None
+    try:
+        async with AsyncClient(verify=False, timeout=600) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                clen = int(resp.headers.get("content-length") or 0)
+                if clen > MAX_BOSS_JCL_BYTES:
+                    return f"JCL 文件过大（{clen // 1024 // 1024}MB），无法分析"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jcl") as tmp:
+                    tmp_path = tmp.name
+                    total = 0
+                    async for chunk in resp.aiter_bytes(65536):
+                        total += len(chunk)
+                        if total > MAX_BOSS_JCL_BYTES:
+                            return f"JCL 文件过大（>{MAX_BOSS_JCL_BYTES // 1024 // 1024}MB），无法分析"
+                        tmp.write(chunk)
+
+        try:
+            data = compute_boss_fight(tmp_path, file_name)
+        except ValueError as e:
+            return str(e)
+        except MemoryError as e:
+            return str(e)
+        finally:
+            gc.collect()
+
+        if not any(p.dps > 0 for p in data.players) and not any(p.hps > 0 for p in data.players):
+            return "未识别到有效 DPS/HPS 统计，请确认 JCL 完整且文件名首领 ID 正确！"
+
+        result = await render_boss_image(data, file_name, get_saohua(), anonymous)
+        del data
+        gc.collect()
+        return result
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
 
 # Tang Huai Ren
 async def THRAnalyze(file_name: str, url: str, anonymous: bool = False, user_id: int = 0):
-    async with AsyncClient(verify=False) as client:
-        resp = await client.post(f"{Config.jx3.api.cqc_url}/thr_analyze", json={"jcl_url": url, "jcl_name": file_name}, timeout=600)
-        data = resp.json()
+    import gc
+    import os
+    import tempfile
 
-    if data["code"] == 400:
-        return "未识别到首领通关，请更换 JCL！"
+    from src.plugins.jx3.calculator.lgz.parser import check_memory_available
+    from src.plugins.jx3.calculator.thr.compute import compute_thr_p1, to_save_payload
+    from src.plugins.jx3.calculator.thr.parser import MAX_THR_JCL_BYTES
+    from src.plugins.jx3.calculator.thr.render import render_thr_image
 
-    final_dps = []
-    final_hps = []
-
-    team_total_damage = sum(r["total_damage"] for r in data["data"][0].values())
-    team_total_damage_per_second = "{:,}".format(int(team_total_damage / data["battle_time"]))
-
-    for player_name, player_data in data["data"][0].items():
-        if anonymous:
-            player_name = "匿名玩家"
-        kungfu: Kungfu = Kungfu.with_internel_id(int(player_data["kungfu_id"]))
-        single_record = Template(bla_template_body).render(
-            icon = kungfu.icon,
-            name = player_name + " - " + str(round(player_data["total_damage"] / team_total_damage * 100, 2)) + "%",
-            rdps = "{:,}".format(int(player_data["total_damage"])),
-            display = str(round(player_data["total_damage"] / list(data["data"][0].values())[0]["total_damage"], 4) * 100),
-            color = kungfu.color,
-            percent = "{:,}".format(int(player_data['damage_per_second']))
-        )
-        final_dps.append(
-            single_record
-        )
-
-    for player_name, player_data in data["data"][1].items():
-        if anonymous:
-            player_name = "匿名玩家"
-        kungfu: Kungfu = Kungfu.with_internel_id(int(player_data["kungfu_id"]))
-        final_hps.append(
-            Template(bla_template_body.replace("dps-num", "hps-num")).render(
-                icon = kungfu.icon,
-                name = player_name,
-                rdps = "{:,}".format(int(player_data["total_health"])),
-                display = str(round(player_data["total_health"] / list(data["data"][1].values())[0]["total_health"] * 100, 2)),
-                color = kungfu.color,
-                percent = "{:,}".format(int(player_data['health_per_second']))
-            )
-        )
+    check_memory_available()
+    tmp_path: str | None = None
     try:
-        save_data(data["data"][0], True, "THR")
-        save_data(data["data"][1], False, "THR")
-    except Exception:
-        pass
+        async with AsyncClient(verify=False, timeout=600) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                clen = int(resp.headers.get("content-length") or 0)
+                if clen > MAX_THR_JCL_BYTES:
+                    return f"JCL 文件过大（{clen // 1024 // 1024}MB），无法分析"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jcl") as tmp:
+                    tmp_path = tmp.name
+                    total = 0
+                    async for chunk in resp.aiter_bytes(65536):
+                        total += len(chunk)
+                        if total > MAX_THR_JCL_BYTES:
+                            return f"JCL 文件过大（>{MAX_THR_JCL_BYTES // 1024 // 1024}MB），无法分析"
+                        tmp.write(chunk)
 
-    html = str(
-        SimpleHTML(
-            "jx3",
-            "cqc_dps",
-            title = "Inkar Suki 唐怀仁 P1 战斗统计",
-            battle_time = str(data["battle_time"]) + f"s | 总 DPS：{team_total_damage_per_second}",
-            dps_stastic = "\n".join(final_dps),
-            hps_stastic = "\n".join(final_hps),
-            saohua = get_saohua(),
-            font = ASSETS + "/font/PingFangSC-Semibold.otf"
-        )
-    )
-    dps_image = await generate(html, ".container", segment=True)
-    return dps_image
+        try:
+            data = compute_thr_p1(tmp_path)
+        except ValueError as e:
+            return str(e)
+        except MemoryError as e:
+            return str(e)
+        finally:
+            gc.collect()
+
+        if not any(p.dps > 0 for p in data.players):
+            return "未识别到唐怀仁 P1 有效伤害统计，请更换 JCL！"
+
+        try:
+            dps_payload, hps_payload = to_save_payload(data)
+            save_data(dps_payload, True, "THR")
+            save_data(hps_payload, False, "THR")
+        except Exception:
+            pass
+
+        result = await render_thr_image(data, file_name, get_saohua(), anonymous)
+        del data
+        gc.collect()
+        return result
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # Tang Huai ren Final
 async def THFAnalyze(file_name: str, url: str, anonymous: bool = False, user_id: int = 0):
@@ -1356,92 +1371,51 @@ async def THFAnalyze(file_name: str, url: str, anonymous: bool = False, user_id:
     dps_image = await generate(html, ".container", segment=True)
     return dps_image
 
-# Liu Gong Zi
+# Liu Gong Zi — 本地 JCL 解析（传功轮次 + 团灭分析）
 async def LGZAnalyze(file_name: str, url: str, anonymous: bool = False, user_id: int = 0):
-    async with AsyncClient(verify=False) as client:
-        resp = await client.post(
-            f"{Config.jx3.api.cqc_url}/lgz_analyze",
-            json={
-                "jcl_url": url,
-                "jcl_name": file_name
-            },
-            timeout=600
-        )
-        data = resp.json()
+    import gc
+    import os
+    import tempfile
 
-    tables = []
-    final_tables = []
+    from src.plugins.jx3.calculator.lgz.parser import MAX_JCL_BYTES, check_memory_available, parse_lgz_jcl_path
+    from src.plugins.jx3.calculator.lgz.render import render_lgz_image
 
-    data = data["data"]
+    check_memory_available()
+    tmp_path: str | None = None
+    try:
+        async with AsyncClient(verify=False, timeout=600) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                clen = int(resp.headers.get("content-length") or 0)
+                if clen > MAX_JCL_BYTES:
+                    return f"JCL 文件过大（{clen // 1024 // 1024}MB），无法分析"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jcl") as tmp:
+                    tmp_path = tmp.name
+                    total = 0
+                    async for chunk in resp.aiter_bytes(65536):
+                        total += len(chunk)
+                        if total > MAX_JCL_BYTES:
+                            return f"JCL 文件过大（>{MAX_JCL_BYTES // 1024 // 1024}MB），无法分析"
+                        tmp.write(chunk)
 
-    if len(data) == 0:
-        return "未识别到有效传功次数，请检查该 JCL 是否为 25人英雄阆风悬城 - 柳公子 的 JCL！"
+        from src.plugins.jx3.calculator.lgz.parser import parse_lgz_jcl_path
 
-    def flush_tables():
-        nonlocal tables, final_tables
-        if not tables:
-            return
-        final_tables.append(
-            Template(lgz_table).render(
-                tables="\n".join(tables)
-            )
-        )
-        tables = []
-    for each_record in data:
-        if not each_record:
-            flush_tables()
-            continue
-        if each_record.get("disarm_kungfu") is not None:
-            tables.append(
-                Template(lgz_detail_template_body_main).render(
-                    icon=Kungfu.with_internel_id(
-                        int(each_record["disarm_kungfu"]),
-                        True
-                    ).icon,
-                    name=each_record["disarm_name"],
-                    status="点名缴械",
-                    status_icon=ASSETS + "/image/jx3/attributes/2399.png",
-                    time=Time(each_record["disarm_time"]).format("%H:%M:%S")
-                )
-            )
-        if each_record.get("placer_kungfu") is not None:
-            tables.append(
-                Template(lgz_detail_template_body_main).render(
-                    icon=Kungfu.with_internel_id(
-                        int(each_record["placer_kungfu"]),
-                        True
-                    ).icon,
-                    name=each_record["placer_name"],
-                    status="放置武器",
-                    status_icon=ASSETS + "/image/jx3/attributes/4558.png",
-                    time=Time(each_record["placer_time"]).format("%H:%M:%S")
-                )
-            )
-        transferers = sort_dict_list(
-            each_record.get("transferers", []),
-            "transferer_time"
-        )
-        for each_transferer in transferers:
-            tables.append(
-                Template(lgz_detail_template_body_sub).render(
-                    icon=Kungfu.with_internel_id(
-                        int(each_transferer["transferer_kungfu"]),
-                        True
-                    ).icon,
-                    name=each_transferer["transferer_name"],
-                    status="传功完成",
-                    status_icon=ASSETS + "/image/jx3/attributes/2401.png",
-                    time=Time(each_transferer["transferer_time"]).format("%H:%M:%S")
-                )
-            )
-    flush_tables()
-    html = Template(
-        read(TEMPLATES + "/jx3/health_detail.html")
-    ).render(
-        font=ASSETS + "/font/PingFangSC-Semibold.otf",
-        tables="\n".join(final_tables),
-        saohua=get_saohua(),
-        function_name="柳公子 · 神秘装置记录"
-    )
-    image = await generate(html, ".container", segment=True)
-    return image
+        try:
+            data = parse_lgz_jcl_path(tmp_path, file_name=file_name, anonymous=anonymous)
+        except ValueError as e:
+            return str(e)
+        except MemoryError as e:
+            return str(e)
+        finally:
+            gc.collect()
+
+        if not data.rounds:
+            return "未识别到有效传功次数，请检查该 JCL 是否为 25人英雄阆风悬城 - 柳公子 的 JCL！"
+
+        result = await render_lgz_image(data, file_name, get_saohua())
+        del data
+        gc.collect()
+        return result
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)

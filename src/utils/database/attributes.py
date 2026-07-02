@@ -4,13 +4,14 @@ from typing_extensions import Self
 
 from src.const.prompts import PROMPT
 from src.const.path import ASSETS, CONST
+from src.config import Config
 from src.const.jx3.kungfu import Kungfu
 from src.const.jx3.server import Server
 from src.utils.file import read
 from src.utils.database import attribute_db as db
 from src.utils.database.classes import PlayerEquipsCache
 from src.utils.network import Request
-from src.utils.analyze import R, TuilanData, merge_dicts, parse_luatable, parse_skillevent
+from src.utils.analyze import R, TuilanData, merge_dicts, parse_luatable, parse_skillevent, Locations
 from src.utils.exceptions import TabFileMissException
 from src.utils.database.constant import (
     A, B, C,
@@ -1116,73 +1117,239 @@ class FinalAttr:
             }
 
 class JX3PlayerAttribute:
+    _EQUIP_SUBTYPE_ALIASES = {
+        "投掷囊": "暗器",
+    }
+    _TAB_KEY_TO_DW_TYPE = {
+        1: 5,
+        2: 7,
+        3: 6,
+    }
+
+    @staticmethod
+    def _default_attribute_api_url() -> str:
+        base = Config.jx3.api.url.rstrip("/")
+        return f"{base}/data/role/attribute"
+
+    @staticmethod
+    def _resolve_attribute_api_url() -> str:
+        url = read(CONST + "/cache/attribute.txt").strip()
+        if url:
+            return url
+        configured = Config.jx3.api.attribute_url.strip()
+        if configured:
+            return configured
+        if Config.jx3.api.enable:
+            return JX3PlayerAttribute._default_attribute_api_url()
+        return ""
+
+    @staticmethod
+    def _equip_subtype_to_location(subtype: str) -> int | None:
+        subtype = JX3PlayerAttribute._EQUIP_SUBTYPE_ALIASES.get(subtype, subtype)
+        if subtype == "武器":
+            return 0
+        try:
+            return Locations.index(subtype)
+        except ValueError:
+            for index, location in enumerate(Locations):
+                if location and location in subtype:
+                    return index
+        return None
+
+    @classmethod
+    def _resolve_dw_tab_type(cls, equip_id: int, location_id: int) -> int:
+        from src.plugins.jx3.calculator.traverse import _equip_tab_key
+
+        tab_key = _equip_tab_key(location_id)
+        for candidate in {tab_key, 1, 2, 3}:
+            try:
+                TabCache.get_equip(equip_id, candidate)
+                return cls._TAB_KEY_TO_DW_TYPE[candidate]
+            except Exception:
+                continue
+        return cls._TAB_KEY_TO_DW_TYPE[tab_key]
+
+    @classmethod
+    def _convert_jx3api_equip(cls, each_equip: dict) -> list | None:
+        subtype = (
+            each_equip.get("EquipType", {}).get("SubType")
+            or each_equip.get("subKind")
+            or ""
+        )
+        location_id = cls._equip_subtype_to_location(subtype)
+        if location_id is None:
+            return None
+
+        equip_id = int(each_equip.get("ID") or each_equip.get("dwTabIndex") or 0)
+        if equip_id <= 0:
+            return None
+
+        tab_type = int(each_equip.get("TabType") or each_equip.get("dwTabType") or cls._resolve_dw_tab_type(equip_id, location_id))
+        strength_level = int(each_equip.get("strengthLevel") or each_equip.get("nStrengthLevel") or 0)
+
+        diamonds: list = []
+        for each_diamond in each_equip.get("fiveStone") or each_equip.get("aSlotItem") or []:
+            if isinstance(each_diamond, list):
+                diamonds.append(each_diamond)
+                continue
+            level = int(each_diamond.get("level") or 0)
+            diamonds.append([5, level + 24441])
+
+        if location_id == 0:
+            color_stone = each_equip.get("colorStone") or {}
+            color_stone_id = color_stone.get("id")
+            if color_stone_id:
+                diamonds.append([0, int(color_stone_id)])
+            elif each_equip.get("ColorInfo"):
+                diamonds.append(each_equip["ColorInfo"][0])
+
+        permanent_enchant = each_equip.get("permanentEnchant") or []
+        permanent_enchant_id = int(
+            each_equip.get("dwPermanentEnchantID")
+            or (permanent_enchant[0]["id"] if permanent_enchant else 0)
+            or 0
+        )
+        common_enchant = each_equip.get("commonEnchant") or {}
+        common_enchant_id = int(
+            each_equip.get("dwTemporaryEnchantID")
+            or common_enchant.get("id")
+            or 0
+        )
+
+        return [
+            location_id,
+            tab_type,
+            equip_id,
+            strength_level,
+            diamonds,
+            permanent_enchant_id,
+            common_enchant_id,
+            0,
+        ]
+
+    @classmethod
+    def _parse_equip_list(cls, equip_list: list) -> list:
+        results: list = []
+        for each_equip in equip_list:
+            if "nItemIndex" in each_equip:
+                position_id = each_equip["nItemIndex"]
+                if position_id not in range(0, 12 + 1):
+                    continue
+                diamonds = list(each_equip.get("aSlotItem") or [])
+                if position_id == 0 and each_equip.get("ColorInfo"):
+                    diamonds.append(each_equip["ColorInfo"][0])
+                results.append(
+                    [
+                        position_id,
+                        each_equip["dwTabType"],
+                        each_equip["dwTabIndex"],
+                        each_equip["nStrengthLevel"],
+                        diamonds,
+                        each_equip["dwPermanentEnchantID"],
+                        each_equip["dwTemporaryEnchantID"],
+                        0,
+                    ]
+                )
+                continue
+
+            converted = cls._convert_jx3api_equip(each_equip)
+            if converted is not None:
+                results.append(converted)
+        return results
+
+    @classmethod
+    async def _request_jx3api_attribute(cls, url: str, params: dict, headers: dict) -> dict:
+        request_url = url
+        if request_url.startswith("/"):
+            request_url = f"{Config.jx3.api.url.rstrip('/')}{request_url}"
+
+        response = await Request(
+            request_url,
+            headers={**headers, "Content-Type": "application/json"},
+            params=dict(params),
+        ).post()
+        raw_data = response.json()
+        if raw_data.get("code") == 200:
+            return raw_data
+
+        response = await Request(request_url, headers=headers, params=params).get()
+        return response.json()
+
+    @classmethod
+    async def _has_cached_equip(cls, global_role_id: str | int) -> bool:
+        instance = await cls.from_database(int(global_role_id), all=False)
+        return instance is not None
+
+    @classmethod
+    async def fetch_auto(
+        cls,
+        role_id: str,
+        server_name: str,
+        role_name: str,
+        global_role_id: str,
+    ) -> bool:
+        """
+        按可用数据源自动拉取装备：JX3API 世界频道接口优先，推栏作为备选。
+        """
+        if Config.jx3.api.enable and cls._resolve_attribute_api_url():
+            await cls.from_jx3api(server_name, role_name, True)
+            if await cls._has_cached_equip(global_role_id):
+                return True
+
+        if Config.jx3.api.ticket and Config.jx3.api.xsk_secret:
+            await cls.from_tuilan(role_id, server_name, global_role_id)
+            if await cls._has_cached_equip(global_role_id):
+                return True
+
+        return False
+
     @classmethod
     async def from_jx3api(cls, server: str, name: str, url_require: bool = False) -> str | None:
         if not url_require:
-            raw_data = {}
-            raw_data["code"] = 404
+            raw_data = {"code": 404}
         else:
-            url = read(CONST + "/cache/attribute.txt")
+            url = cls._resolve_attribute_api_url()
+            if not url:
+                return None
             params = {
                 "server": server,
                 "name": name,
-                "format": "client"
             }
+            headers: dict[str, str] = {}
+            if Config.jx3.api.token:
+                params["token"] = Config.jx3.api.token
+                headers["token"] = Config.jx3.api.token
+            if Config.jx3.api.ticket:
+                params["ticket"] = Config.jx3.api.ticket
             try:
-                raw_data = (await Request(url, params=params).get()).json()
+                raw_data = await cls._request_jx3api_attribute(url, params, headers)
+                if raw_data.get("code") != 200:
+                    client_params = {**params, "format": "client"}
+                    raw_data = await cls._request_jx3api_attribute(url, client_params, headers)
             except Exception:
                 return None
-            
-        if raw_data["code"] != 200:
-            return PROMPT.PlayerNotExist
-        results = []
-        
-        if "equipList" not in raw_data["data"]:
+
+        if raw_data.get("code") != 200:
             return None
 
-        for each_equip in raw_data["data"]["equipList"]:
-            position_id = each_equip["nItemIndex"]
-            
-            if position_id not in range(0, 12+1):
-                continue
+        data = raw_data.get("data") or {}
+        if "equipList" not in data:
+            return None
 
-            tab_type = each_equip["dwTabType"]
-            tab_index = each_equip["dwTabIndex"]
-            strength_level = each_equip["nStrengthLevel"]
-            
-            diamonds = []
+        results = cls._parse_equip_list(data["equipList"])
+        if not results:
+            return None
 
-            for each_diamond in each_equip.get("aSlotItem", []):
-                diamonds.append(
-                    each_diamond
-                )
-            
-            if position_id == 0:
-                diamonds.append(
-                    each_equip["ColorInfo"][0]
-                )
-
-            permanent_enchant_id = each_equip["dwPermanentEnchantID"]
-            common_enchant_id = each_equip["dwTemporaryEnchantID"]
-            
-            results.append(
-                [
-                    position_id,
-                    tab_type,
-                    tab_index,
-                    strength_level,
-                    diamonds,
-                    permanent_enchant_id,
-                    common_enchant_id,
-                    0
-                ]
-            )
+        kungfu_id = data.get("kungfuId")
+        global_id = data.get("globalId")
+        if kungfu_id is None or global_id is None:
+            return None
 
         instance = cls(
             results,
             [],
-            int(raw_data["data"]["kungfuId"]),
-            int(raw_data["data"]["globalId"])
+            int(kungfu_id),
+            int(global_id),
         )
         try:
             instance.save()

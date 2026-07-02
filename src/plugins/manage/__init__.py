@@ -35,6 +35,7 @@ from src.utils.message import message_universal
 
 from ._message import leave_msg
 from .developer import *  # noqa: F403
+from .menu import *  # noqa: F403
 
 try:
     from .auto_accept import *  # type: ignore  # noqa: F403

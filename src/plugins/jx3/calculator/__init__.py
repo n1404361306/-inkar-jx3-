@@ -101,13 +101,14 @@ JCL_ANALYSIS_HELP_TEXT = (
     "音卡可以通过JCL分析副本战斗时各种情况，需在打之前勾选茗伊战斗事件记录（见图片），不同的前缀有不同的效果，前缀直接在文件名前方加上后直接上传至有音卡的群（如果群主不嫌消息多的话）\n\n"
     "【BLA-】 单BOSS 全程 RHPS+RDPS分析（powered by 剑三警长）\n"
     "【LNX-】鲁念雪 每阶段减伤/治疗/化解贡献统计\n"
-    "【ASN-】阿史那承庆 QTE计数+死侍HPS统计\n"
-    "【THR-】唐怀仁P1 DPS统计+榜单\n"
+    "【ASN-】阿史那承庆 汲取QTE（破）排名+死侍索命期间治疗排名\n"
+    "【BOSS-】任意首领 全程 DPS/HPS 榜单（本地解析，按首领进战/脱战切分）\n"
+    "【THR-】唐怀仁 P1 DPS/HPS 统计+榜单（本地解析，P1 切分：进战→转阶段喊话）\n"
     "【TRD-】唐怀仁 P1 阶段 RDPS 分析（powered by 剑三警长）\n"
     "裁剪区间：开始战斗-BOSS喊话\n"
     "【THF-】唐怀仁P3 DPS统计\n"
     "裁剪区间：毁灭读条-叶鸦出现\n"
-    "【LGZ-】柳公子传功记录\n"
+    "【LGZ-】柳公子传功与团灭分析（本地解析，无需 cqc_url）\n"
     "【FAL-】前三次攻击记录，用于查开怪，尤其是阿里曼幻身的圣柱\n"
     "【YXC-】尹雪尘承伤统计，注意只会记录每个玩家的有效而非全部治疗\n"
     "【ROD-】重伤记录统计\n"
@@ -3452,58 +3453,5 @@ async def _(event: GroupMessageEvent, args: Message = CommandArg()):
         await remove_all_calculator_loop_matcher.finish(f"已删除 {kungfu.name or query} 的全部自定义循环！")
     await remove_all_calculator_loop_matcher.finish("循环删除失败！" + str(result.get("msg", "")))
 
-def check_jcl_name(filename: str, prefix: str) -> bool:
-    if not filename.startswith(prefix):
-        return False
-    pattern = re.compile(
-        r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-[\u4e00-\u9fff·\d]+(?:\(\d+\))?-[\u4e00-\u9fff·\d]+(?:\(\d+\))?\.jcl$"
-    )
-    return bool(pattern.match(filename[4:]))
-
-@notice.handle()
-async def _(bot: Bot, event: GroupUploadNoticeEvent):
-    analyzer: Callable | None = None
-    if check_jcl_name(event.file.name, "BLA-"):
-        analyzer = BLACalculator
-    elif check_jcl_name(event.file.name, "TRD-"):
-        analyzer = TRDCalculator
-    elif check_jcl_name(event.file.name, "CQC-"):
-        analyzer = CQCAnalyze
-    elif check_jcl_name(event.file.name, "FAL-"):
-        analyzer = FALAnalyze
-    elif check_jcl_name(event.file.name, "YXC-"):
-        analyzer = YXCAnalyze
-    elif check_jcl_name(event.file.name, "ROD-"):
-        analyzer = RODAnalyze
-    # elif check_jcl_name(event.file.name, "HPS-"):
-    #     analyzer = HPSAnalyze
-    elif event.file.name.startswith("CAL-"):
-        analyzer = CALAnalyze
-    elif check_jcl_name(event.file.name, "ASN-"):
-        analyzer = ASNAnalyze
-    elif check_jcl_name(event.file.name, "THR-"):
-        analyzer = THRAnalyze
-    elif check_jcl_name(event.file.name, "THF-"):
-        analyzer = THFAnalyze
-    elif check_jcl_name(event.file.name, "LGZ-"):
-        analyzer = LGZAnalyze
-    elif check_jcl_name(event.file.name, "LNX-"):
-        analyzer = LNXAnalyze
-    else:
-        return
-    
-    if analyzer is not None:
-        anonymous_preference = Preference(event.user_id, "", "").setting("匿名分析")
-        is_anonymous = anonymous_preference == "开启"
-        try:
-            url = event.model_dump()["file"]["url"]
-        except KeyError:
-            file_id = event.model_dump()["file"]["id"]
-            bus_id = event.model_dump()["file"]["busid"]
-            file_data = await bot.call_api("get_group_file_url", group_id=event.group_id, file_id=file_id, bus_id=bus_id)
-            url = file_data["url"]
-        try:
-            image = await analyzer(event.file.name[4:], url, is_anonymous, event.user_id)
-            await bot.send_group_msg(group_id=event.group_id, message=Message(image))
-        except json.decoder.JSONDecodeError:
-            await bot.send_group_msg(group_id=event.group_id, message="啊哦，音卡的服务器目前似乎暂时有些小问题，请稍后再使用JCL分析？")
+from .jcl_upload import check_jcl_name  # noqa: F401 — 兼容旧引用
+from . import jcl_upload as _jcl_upload  # noqa: F401 — 注册上传处理器

@@ -181,6 +181,17 @@ src/plugins/manage/application_v2.py
 src/config/config.yml
 .env.dev
 
+# Local database
+guild1.db
+guild1.db-shm
+guild1.db-wal
+*.db-shm
+*.db-wal
+
+# NapCat credentials
+deploy/scripts/napcat.env
+.env.local
+
 # Data files
 src/data/
 src/cache/

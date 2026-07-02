@@ -5,7 +5,7 @@ from nonebot.adapters.onebot.v11 import MessageSegment
 from src.config import Config
 from src.const.path import ASSETS, build_path
 from src.utils.generate import (
-    ScreenshotGenerator
+    ScreenshotGenerator  # noqa: F401 — 按需 lazy launch
 )
 from src.utils.time import Time
 from src.utils.database import cache_db
@@ -83,6 +83,17 @@ async def on_startup():
         "token": Config.jx3.ws.token
     }
     asyncio.create_task(websocket_client(ws_url, headers))
-    asyncio.create_task(ScreenshotGenerator.launch())
     if Config.jx3.api.weibo:
         asyncio.create_task(poll_weibo_api("2046281757", interval=600))
+    try:
+        await ScreenshotGenerator.launch()
+    except Exception as e:
+        logger.warning(f"Playwright 预加载失败，将在首次截图时重试: {e}")
+
+
+@driver.on_shutdown
+async def on_shutdown():
+    try:
+        await ScreenshotGenerator.close()
+    except Exception as e:
+        logger.warning(f"Playwright 关闭失败: {e}")

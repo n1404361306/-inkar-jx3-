@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @font-face {
+            font-family: Harmony;
+            src: url("{{ font }}");
+        }
+
+        body {
+            font-family: Harmony, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+        }
+
+        .container {
+            display: inline-block;
+            padding: 24px;
+            background: white;
+            min-width: 1200px;
+            max-width: 1600px;
+        }
+
+        h1 {
+            font-size: 32px;
+            margin: 0 0 8px;
+            color: #222;
+        }
+
+        .meta {
+            font-size: 20px;
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            font-size: 26px;
+            margin: 28px 0 12px;
+            color: #333;
+            border-left: 5px solid #597aa8;
+            padding-left: 12px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+            margin-bottom: 16px;
+        }
+
+        th {
+            padding: 10px;
+            text-align: center;
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #444;
+            font-size: 20px;
+        }
+
+        td {
+            padding: 10px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            font-size: 20px;
+        }
+
+        .main-row td {
+            background: #fff;
+        }
+
+        .sub-row td {
+            padding: 4px 10px;
+            font-size: 17px;
+            color: #666;
+            background: #fafafa;
+        }
+
+        .wipe-box {
+            background: #fff8f0;
+            border: 1px solid #f0d8b8;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            font-size: 22px;
+            line-height: 1.7;
+        }
+
+        .wipe-primary {
+            font-size: 24px;
+            font-weight: 700;
+            color: #c45c26;
+            margin-top: 8px;
+        }
+
+        footer {
+            margin-top: 24px;
+            padding: 14px;
+            background: #f0f0f0;
+            text-align: center;
+            font-size: 18px;
+            color: #777;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>柳公子 · 传功与团灭分析</h1>
+        <div class="meta">
+            {{ file_name }} | {{ server }} | {{ map_name }} | 时长 {{ duration }} | 传功 {{ round_count }} 轮
+        </div>
+
+        <h2>传功轮次记录</h2>
+        {{ round_tables }}
+
+        <h2>团灭分析</h2>
+        <div class="wipe-box">
+            <div>是否团灭：<strong>{{ is_wipe }}</strong> · 类型：<strong>{{ wipe_category }}</strong> ·
+                爆发时刻：<strong>{{ wipe_time }}</strong> · 3秒内重伤：<strong>{{ wipe_count }}</strong> 人</div>
+            <div class="wipe-primary">{{ wipe_detail }}</div>
+            {% if is_wipe %}
+            <div style="margin-top:8px;color:#555;">{{ damage_summary }}</div>
+            {% endif %}
+        </div>
+
+        <footer>柳公子 JCL 本地分析 | Inkar-Suki：{{ saohua }}</footer>
+    </div>
+</body>
+
+</html>
