@@ -16,47 +16,46 @@ level_icon = [18505, 4533, 13548, 13547, 3313, 4577, 4543, 4558, 4576, 4573]
 
 # $Flag 特殊层标识 ; $Icon 图标 ; $Count 层数 ; $bossName 首领名称 ; $Desc 描述 ; $Coin 修罗之印
 
-async def get_monsters_map():
-    map_data = (await Request("https://cms.jx3box.com/api/cms/app/monster/map").get()).json()
-    boss = (await Request("https://node.jx3box.com/monster/boss").get()).json()
+def _build_boss_lookup(boss_data: list[dict]) -> dict[int, str]:
+    lookup: dict[int, str] = {}
+    for item in boss_data:
+        npc_id = item.get("dwNpcID")
+        name = item.get("szName")
+        if npc_id and name:
+            lookup[npc_id] = name
+    return lookup
+
+def _parse_effect(level: int) -> tuple[str, str, str, str]:
+    info = level_desc[level] if level < len(level_desc) else ""
+    icon_id = level_icon[level] if level < len(level_icon) else level_icon[0]
+    icon = f"https://icon.jx3box.com/icon/{icon_id}.png"
+    flag = " is-effect" if level != 0 else ""
+    details = info.split(";")
+    if len(details) == 2:
+        return flag, icon, details[0], details[1]
+    if len(details) == 1 and details[0]:
+        if details[0][0] == "+":
+            return flag, icon, "", details[0]
+        return flag, icon, details[0], ""
+    return flag, icon, "", ""
+
+def _build_map_content(layers: list[dict], boss_lookup: dict[int, str]) -> str:
     content = ["<div class=\"u-row\">"]
-    for i in range(len(map_data["data"]["data"])):
-        bid = map_data["data"]["data"][i]["dwBossID"]
-        for x in boss["data"]:
-            if x["dwNpcID"] == bid:
-                name = x["szName"]
-        level = map_data["data"]["data"][i]["nEffectID"]
-        info = level_desc[level]
-        icon = f"https://icon.jx3box.com/icon/{level_icon[level]}.png"
-        flag = " is-effect" if level != 0 else ""  # 勿除空格
-        details = info.split(";")
-        if len(details) == 2:
-            desc = details[0]
-            coin = details[1]
-        elif len(details) == 1:
-            if details[0] == "":
-                desc = ""
-                coin = ""
-            else:
-                if details[0][0] == "+":
-                    desc = ""
-                    coin = details[0]
-                else:
-                    desc = details[0]
-                    coin = ""
-        else:
-            desc = ""
-            coin = ""
+    for i, layer in enumerate(layers):
+        bid = layer["dwBossID"]
+        name = boss_lookup.get(bid, "未知首领")
+        level = layer["nEffectID"]
+        flag, icon, desc, coin = _parse_effect(level)
         count = i + 1
         if count % 10 == 0:
-            flag = flag + " is-elite"  # 勿除空格
+            flag = flag + " is-elite"
         new = Template(template_monsters).render(
-            flag = flag,
-            icon = icon,
-            count = str(count),
-            name = name,
-            desc = desc,
-            coin = coin
+            flag=flag,
+            icon=icon,
+            count=str(count),
+            name=name,
+            desc=desc,
+            coin=coin,
         )
         if count % 10 == 0:
             content.append(new)
@@ -66,16 +65,46 @@ async def get_monsters_map():
                 content.append("</div>")
         else:
             content.append(new)
-    start = re.sub(r"\..+\Z", "", map_data["data"]["start"].replace("T", " ")).split(" ")[0]
+    return "\n".join(content)
+
+def _resolve_weekly_dangjian_boss_name(boss_lookup: dict[int, str], map_payload: dict, boss_data: list[dict]) -> str:
+    """本周荡剑恩仇专属首领（非 1-100 层），优先读 CMS extra，否则取 nGroup=10002。"""
+    asura_id = map_payload.get("extra", {}).get("asura", {}).get("dwBossID")
+    boss_id = None
+    if asura_id and str(asura_id).isdigit() and int(asura_id):
+        boss_id = int(asura_id)
+    else:
+        for item in boss_data:
+            if item.get("nGroup") == 10002:
+                boss_id = item.get("dwNpcID")
+                if boss_id:
+                    break
+    if not boss_id:
+        return ""
+    return boss_lookup.get(boss_id, "")
+
+async def get_monsters_map():
+    map_data = (await Request("https://cms.jx3box.com/api/cms/app/monster/map").get()).json()
+    boss = (await Request("https://node.jx3box.com/monster/boss").get()).json()
+    layers = map_data["data"]["data"]
+    map_payload = map_data["data"]
+    boss_lookup = _build_boss_lookup(boss["data"])
+
+    table_content = _build_map_content(layers, boss_lookup)
+
+    weekly_boss_name = _resolve_weekly_dangjian_boss_name(boss_lookup, map_payload, boss["data"])
+
+    start = re.sub(r"\..+\Z", "", map_payload["start"].replace("T", " ")).split(" ")[0]
     current_time = Time().format("%H:%M:%S")
     msg = "严禁将蓉蓉机器人与音卡共存，一经发现永久封禁！蓉蓉是抄袭音卡的劣质机器人！"
     html = str(
         SimpleHTML(
             "jx3",
             "monsters.html",
-            font = build_path(ASSETS, ["font", "PingFangSC-Medium.otf"]),
-            table_content = "\n".join(content),
-            application_name = f"自{start}起7天 · 当前时间：{current_time}<br>{msg}"
+            font=build_path(ASSETS, ["font", "PingFangSC-Medium.otf"]),
+            table_content=table_content,
+            dangjian_boss_name=weekly_boss_name,
+            application_name=f"自{start}起7天 · 当前时间：{current_time}<br>{msg}",
         )
     )
     image = await generate(html, ".m-bmap.is-map-phone", segment=True)

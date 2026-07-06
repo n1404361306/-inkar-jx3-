@@ -410,6 +410,14 @@
         body {
             font-family: Harmony, sans-serif;
         }
+
+        .dangjian-footer {
+            text-align: center;
+            font-size: 18px;
+            line-height: 1.6;
+            color: #555;
+            margin: 16px 0 8px;
+        }
     </style>
 </head>
 
@@ -420,8 +428,11 @@
                 <div class="u-list">
                     {{ table_content }}
                 </div>
-                <div class="copyright">&copy; Inkar Suki · 百战异闻录 · {{ application_name }}</div>
             </div>
+            {% if dangjian_boss_name %}
+            <div class="dangjian-footer">荡剑恩仇<br>{{ dangjian_boss_name }}</div>
+            {% endif %}
+            <div class="copyright">&copy; Inkar Suki · 百战异闻录 · {{ application_name }}</div>
         </div>
     </div>
     </div>
