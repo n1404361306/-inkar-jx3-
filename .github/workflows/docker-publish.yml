@@ -1,11 +1,8 @@
 name: Docker Build and Push
 
+# 已禁用：推送不再自动触发构建，需要时可在 Actions 页手动 workflow_dispatch
 on:
-  push:
-    branches:
-      - main
-      - master
-  workflow_dispatch:  # 支持手动触发
+  workflow_dispatch:
 
 env:
   REGISTRY: docker.io

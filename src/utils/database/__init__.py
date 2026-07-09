@@ -18,6 +18,7 @@ from src.utils.database.classes import (
     RequestData,
     SerendipityData,
     GroupMessage,
+    AIChatUsage,
     RandomAffectionRecord,
     EquipReplacementLog
 )
@@ -45,7 +46,8 @@ cache_db.auto_migrate(
     BanRecord(),
     JX3APIWSData(),
     RequestData(),
-    GroupMessage()
+    GroupMessage(),
+    AIChatUsage()
 )
 
 serendipity_db = Database(build_path(DATA, ["serendipity.db"]))

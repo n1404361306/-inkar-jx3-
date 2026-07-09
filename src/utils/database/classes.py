@@ -156,6 +156,12 @@ class GroupMessage(LiteModel):
     user_id: int = 0
     messages: list[MemberMessage] = []
 
+class AIChatUsage(LiteModel):
+    TABLE_NAME: str = "ai_chat_usage"
+    user_id: int = 0
+    usage_date: str = ""
+    count: int = 0
+
 class CQCRank(LiteModel):
     TABLE_NAME: str = "cqc_rank"
     role_name: str = ""

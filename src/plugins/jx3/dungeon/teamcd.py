@@ -21,6 +21,30 @@ from ._template import (
     table_zone_record_head
 )
 
+_EMPTY_TEAMCD_MSG = "该玩家目前尚未打过任何副本哦~\n注意：10人普通副本会在周五刷新一次。"
+
+
+def _teamcd_entries(raw: dict | None) -> tuple[list[dict] | None, str | None]:
+    if not isinstance(raw, dict):
+        return None, "副本记录接口返回异常，请稍后再试！"
+    code = raw.get("code")
+    if code not in (0, 200):
+        msg = str(raw.get("msg") or "未知错误")
+        if "signature" in msg.lower() or "sign" in msg.lower():
+            return None, "副本记录接口签名失败，请联系 Bot 管理员配置 sign_secret。"
+        return None, f"副本记录查询失败：{msg}"
+    entries = raw.get("data")
+    if entries is None:
+        return None, "副本记录接口未返回数据，请稍后再试！"
+    if not isinstance(entries, list):
+        return None, "副本记录接口返回格式异常，请稍后再试！"
+    return entries, None
+
+
+def _boss_progress(entry: dict) -> list[dict]:
+    progress = entry.get("bossProgress")
+    return progress if isinstance(progress, list) else []
+
 def sort_role_data(objects: list[RoleData]) -> list[RoleData]:
     server_counts = Counter(obj.serverName for obj in objects)
     return sorted(objects, key=lambda obj: server_counts[obj.serverName], reverse=True)
@@ -40,53 +64,55 @@ async def get_zone_record_image(server: str, role: str):
     if guid == "":
         return PROMPT.PlayerNotExist
     request = build_teamcd_request(guid)
-    data = (await request.post(tuilan=True)).json()
+    raw = (await request.post(tuilan=True)).json()
+    entries, error = _teamcd_entries(raw)
+    if error:
+        return error
+    if not entries:
+        return _EMPTY_TEAMCD_MSG
     unable = Template(image_template).render(
         image_path = build_path(ASSETS, ["image", "jx3", "cat", "grey.png"])
     )
     available = Template(image_template).render(
         image_path = build_path(ASSETS, ["image", "jx3", "cat", "gold.png"])
     )
-    if data["data"] == []:
-        return "该玩家目前尚未打过任何副本哦~\n注意：10人普通副本会在周五刷新一次。"
-    else:
-        contents = []
-        if data is None:
-            return PROMPT.PlayerNotExist
-        for i in data["data"]:
-            images = []
-            map_name = i["mapName"]
-            map_type = i["mapType"]
-            for x in i["bossProgress"]:
-                if x["finished"] is True:
-                    images.append(unable)
-                else:
-                    images.append(available)
-            image_content = "\n".join(images)
-            contents.append(
-                Template(template_zone_record).render(
-                    zone_name = map_name,
-                    zone_mode = map_type,
-                    images = image_content
-                )
-            )
-        html = str(
-            HTMLSourceCode(
-                application_name = f"副本记录 · [{role}·{server}]",
-                table_head = table_zone_record_head,
-                table_body = "\n".join(contents)
+    contents = []
+    for i in entries:
+        images = []
+        map_name = i["mapName"]
+        map_type = i["mapType"]
+        for x in _boss_progress(i):
+            if x["finished"] is True:
+                images.append(unable)
+            else:
+                images.append(available)
+        image_content = "\n".join(images)
+        contents.append(
+            Template(template_zone_record).render(
+                zone_name = map_name,
+                zone_mode = map_type,
+                images = image_content
             )
         )
-        image = await generate(html, ".container", segment=True)
-        return image
+    html = str(
+        HTMLSourceCode(
+            application_name = f"副本记录 · [{role}·{server}]",
+            table_head = table_zone_record_head,
+            table_body = "\n".join(contents)
+        )
+    )
+    image = await generate(html, ".container", segment=True)
+    return image
     
 def parse_data(data) -> dict:
+    entries, error = _teamcd_entries(data)
+    if error or not entries:
+        return {}
     result = {}
-    for entry in data["data"]:
+    for entry in entries:
         map_type = entry["mapType"]
         map_name = entry["mapName"]
-        boss_progress = entry["bossProgress"]
-        progress_finished = [boss["finished"] for boss in boss_progress]
+        progress_finished = [boss["finished"] for boss in _boss_progress(entry)]
         key = f"{map_type}{map_name}"
         result[key] = progress_finished
     return result
@@ -131,11 +157,17 @@ async def get_mulit_record_image(server: str, roles: list[str]):
     ]
     roles_data: list[list[dict[str, list[bool]]]] = [[] for _ in range(len(found_roles))]
     num = 0
+    api_error: str | None = None
     for each_response in responses:
+        _, error = _teamcd_entries(each_response)
+        if error and api_error is None:
+            api_error = error
         roles_data[num].append(parse_data(each_response))
         num += 1
     final_data = synchronize_keys(roles_data)
     zones: list[str] = list(set(chain.from_iterable(d.keys() for sublist in final_data for d in sublist)))
+    if not zones:
+        return api_error or _EMPTY_TEAMCD_MSG
     table_head = "<tr><th class=\"short-column\">角色</th>" + "\n".join([f"<th class=\"short-column\">{zone}</th>" for zone in zones]) + "</tr>"
     tables: list[str] = []
     num = 0
@@ -176,13 +208,19 @@ async def get_personal_roles_teamcd_image(user_id: int, keyword: str = ""):
     ]
     roles_data: list[list[dict[str, list[bool]]]] = [[] for _ in range(len(roles))]
     num = 0
+    api_error: str | None = None
     for each_response in responses:
+        _, error = _teamcd_entries(each_response)
+        if error and api_error is None:
+            api_error = error
         roles_data[num].append(parse_data(each_response))
         num += 1
     final_data = synchronize_keys(roles_data)
     zones: list[str] = list(set(chain.from_iterable(d.keys() for sublist in final_data for d in sublist)))
     zones = [z for z in zones if keyword in z]
     if len(zones) == 0:
+        if api_error:
+            return api_error
         return "未找到相关副本，请检查后重试！\n可能是当前所有绑定账号均未产生相关副本的记录，待至少一个角色通关其中一个首领后将产生记录。"
     width = 730 + len(zones) * 200
     zones = [z.lstrip("10人普通") for z in zones]

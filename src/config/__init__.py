@@ -51,12 +51,22 @@ class QWeather(BaseModel):
 class Hidden(BaseModel):
     offcial_token: str = ""
 
+class DeepSeekConfig(BaseModel):
+    enable: bool = False
+    api_key: str = ""
+    base_url: str = "https://api.deepseek.com"
+    model: str = "deepseek-chat"
+    max_reply_length: int = 500
+    daily_limit: int = 20
+    timeout: int = 60
+
 class config(BaseModel):
     bot_basic: BotBasic
     github: GitHubConfig
     jx3: Jx3Config
     weather: QWeather
     hidden: Hidden
+    deepseek: DeepSeekConfig = DeepSeekConfig()
 
     @classmethod
     def from_yaml(cls, yaml_str: str) -> "config":
